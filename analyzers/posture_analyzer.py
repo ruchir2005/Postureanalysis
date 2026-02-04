@@ -123,8 +123,9 @@ class PostureAnalyzer:
         issues = []
         posture_type = PostureType.UPRIGHT
         
-        # Check shoulder tilt (uneven shoulders)
-        if abs(shoulder_angle) > self.upright_threshold:
+        # Check shoulder tilt (uneven shoulders) - use 15 degree threshold
+        # Most people have slightly uneven shoulders naturally
+        if abs(shoulder_angle) > 15:
             if shoulder_angle > 0:
                 issues.append("right_shoulder_low")
             else:
@@ -134,14 +135,16 @@ class PostureAnalyzer:
         avg_shoulder_y = (left_shoulder["y"] + right_shoulder["y"]) / 2
         if self.baseline_shoulder_y is not None:
             shoulder_drop = avg_shoulder_y - self.baseline_shoulder_y
-            if shoulder_drop > self.slouch_threshold / 100:  # Convert to normalized
+            # More forgiving threshold - 0.08 is about 8% of frame height
+            if shoulder_drop > 0.08:
                 posture_type = PostureType.SLOUCHING
                 issues.append("slouching")
         
-        # Check for head tilt using ears
+        # Check for head tilt using ears (less sensitive threshold)
         if left_ear and right_ear:
             head_tilt = self._calculate_head_tilt(left_ear, right_ear)
-            if abs(head_tilt) > self.head_tilt_threshold:
+            # Only flag significant head tilts (> 20 degrees)
+            if abs(head_tilt) > 20:
                 if head_tilt > 0:
                     posture_type = PostureType.HEAD_TILT_RIGHT
                     issues.append("head_tilted_right")
@@ -150,12 +153,14 @@ class PostureAnalyzer:
                     issues.append("head_tilted_left")
         
         # Check for forward/backward lean using nose z-depth
+        # Note: z-depth from webcams is less reliable, use higher tolerance
         if self.baseline_nose_z is not None and nose.get("z") is not None:
             nose_z_diff = nose["z"] - self.baseline_nose_z
-            if nose_z_diff < -self.lean_forward_threshold / 100:
+            # More forgiving thresholds for z-depth (webcam depth is noisy)
+            if nose_z_diff < -0.15:  # Significant forward lean
                 posture_type = PostureType.LEANING_FORWARD
                 issues.append("leaning_forward")
-            elif nose_z_diff > self.lean_back_threshold / 100:
+            elif nose_z_diff > 0.12:  # Significant backward lean
                 posture_type = PostureType.LEANING_BACKWARD
                 issues.append("leaning_backward")
         
@@ -241,23 +246,25 @@ class PostureAnalyzer:
         """Calculate a 0-1 posture score based on detected issues."""
         base_score = 1.0
         
-        # Deduct for each issue
+        # Reduced penalties for more realistic scoring
         issue_penalties = {
-            "slouching": 0.25,
-            "leaning_forward": 0.2,
-            "leaning_backward": 0.15,
-            "head_tilted_left": 0.15,
-            "head_tilted_right": 0.15,
-            "left_shoulder_low": 0.1,
-            "right_shoulder_low": 0.1
+            "slouching": 0.15,
+            "leaning_forward": 0.12,
+            "leaning_backward": 0.10,
+            "head_tilted_left": 0.08,
+            "head_tilted_right": 0.08,
+            "left_shoulder_low": 0.05,
+            "right_shoulder_low": 0.05
         }
         
         for issue in issues:
-            base_score -= issue_penalties.get(issue, 0.1)
+            base_score -= issue_penalties.get(issue, 0.05)
         
-        # Additional penalty based on shoulder angle magnitude
-        angle_penalty = min(0.2, abs(shoulder_angle) / 90 * 0.2)
-        base_score -= angle_penalty
+        # Reduced angle penalty - small shoulder angles are normal
+        # Only penalize if angle is more than 5 degrees
+        if abs(shoulder_angle) > 5:
+            angle_penalty = min(0.1, (abs(shoulder_angle) - 5) / 90 * 0.15)
+            base_score -= angle_penalty
         
         return max(0.0, min(1.0, base_score))
     

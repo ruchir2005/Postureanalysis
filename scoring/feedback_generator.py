@@ -39,6 +39,9 @@ class FeedbackGenerator:
     Implements cooldown to prevent message flooding.
     """
     
+    # Minimum time a message stays visible (in seconds)
+    MESSAGE_PERSISTENCE = 3.0
+    
     def __init__(
         self,
         cooldown: float = config.FEEDBACK_COOLDOWN,
@@ -59,6 +62,10 @@ class FeedbackGenerator:
         
         # Currently active feedback
         self.active_feedback: List[Feedback] = []
+        
+        # Persistent message tracking
+        self.current_message: Optional[str] = None
+        self.message_shown_at: float = 0.0
         
         # Feedback messages
         self.messages = config.FEEDBACK_MESSAGES
@@ -206,12 +213,36 @@ class FeedbackGenerator:
         return [fb.message for fb in self.active_feedback]
     
     def get_primary_feedback(self) -> Optional[str]:
-        """Get the highest priority feedback message."""
+        """Get the highest priority feedback message with persistence."""
+        current_time = time.time()
+        
+        # Check if current message should persist
+        if self.current_message is not None:
+            time_since_shown = current_time - self.message_shown_at
+            if time_since_shown < self.MESSAGE_PERSISTENCE:
+                # Keep showing the current message
+                return self.current_message
+        
+        # Time to potentially update the message
         if self.active_feedback:
-            return self.active_feedback[0].message
-        return None
+            new_message = self.active_feedback[0].message
+            # Only update if message is different or enough time has passed
+            if new_message != self.current_message:
+                self.current_message = new_message
+                self.message_shown_at = current_time
+            return self.current_message
+        
+        # No active feedback - clear after persistence period
+        if self.current_message is not None:
+            time_since_shown = current_time - self.message_shown_at
+            if time_since_shown >= self.MESSAGE_PERSISTENCE:
+                self.current_message = None
+        
+        return self.current_message
     
     def reset(self):
         """Reset generator state."""
         self.last_feedback_times = {}
         self.active_feedback = []
+        self.current_message = None
+        self.message_shown_at = 0.0
